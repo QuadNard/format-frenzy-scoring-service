@@ -1,0 +1,7 @@
+.git
+__pycache__
+.venv
+*.pyc
+tests
+logs/
+error_snippets*.jsonl

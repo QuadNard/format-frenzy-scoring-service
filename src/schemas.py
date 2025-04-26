@@ -2,20 +2,15 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
-class QuestionSet(BaseModel):
-    question_id: str
-    correct_code: str
-
 class ConstructAnswerItem(BaseModel):
     question_id: str
-    ast_dump: str
+    correct_code: str
 
 class ConstructAnswersResponse(BaseModel):
     answers: List[ConstructAnswerItem]
 
 class CheckAnswerRequest(BaseModel):
     question_id: str
-    correct_code: str
     user_code: str
     correct_ast: str    # AST dump as a string
 
@@ -31,9 +26,6 @@ class Feedback(BaseModel):
     issues: List[CodeIssue] = []
 
 class ScoreResponse(BaseModel):
-    correct: bool
-    points: int
-    feedback: Optional[List[str]] = None
     exact_match: bool
     score: float
     feedback: Feedback

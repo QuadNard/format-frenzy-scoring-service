@@ -1,8 +1,11 @@
 import difflib
 import ast
 from typing import List, Dict, Any
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+
 
 from src.schemas import (
     CheckAnswerRequest,
@@ -13,9 +16,22 @@ from src.schemas import (
 )
 
 from src.server.cruds import crud_router_v1
-from src.ast_analyzer import find_missing_nodes
+from src.utils.error_logger import error_logger, log_error
 
-app = FastAPI()
+
+app = FastAPI(
+    lifespan=None
+)
+
+@asynccontextmanager
+async def lifespan_handler(_: FastAPI):
+    # Startup code (runs before first request)
+    yield
+    # Shutdown code (runs after server stops)
+    error_logger.shutdown()
+
+# Instantiate FastAPI with the lifespan handler
+app = FastAPI(lifespan=lifespan_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,27 +60,30 @@ def get_ast_dump(src: str) -> str:
         ) from e
 
 
-def compare_ast(user_code: str,
-                correct_code: str,
-                user_dump: str,
-                correct_dump:str) -> Dict[str, Any]:
-    """Compute exact-match, percentage score, and structured issues with accurate line numbers."""
+def compare_ast(user_dump: str, correct_dump: str) -> Dict[str, Any]:
+    """Compute exact-match, percentage score, and structured issues."""
     if user_dump == correct_dump:
-        return {"exact_match": True, "score": 100.0,
-                "feedback": {"message": "Exact AST match!", "issues": []}}
+        return {
+            "exact_match": True,
+            "score": 100.0,
+            "feedback": {"message": "Perfect match!", "issues": []}
+        }
 
     sim = difflib.SequenceMatcher(None, user_dump, correct_dump).ratio() * 100
-    # Use the imported function
-    issues = find_missing_nodes(user_code, correct_code)
-    # If no specific issues found, provide a general similarity message
+    issues: List[Dict[str, Any]] = []
+
+    # Heuristic checks on dumps
+    if user_dump.count("Return(") < correct_dump.count("Return("):
+        issues.append({"message": "Missing return statements"})
+    if user_dump.count("If(") < correct_dump.count("If("):
+        issues.append({"message": "Missing conditional statements"})
+    if user_dump.count("For(") < correct_dump.count("For("):
+        issues.append({"message": "Missing loop structures"})
+
+    # Always at least one generic issue if none of the above
     if not issues:
-        issues = [{
-            "line_number": 1,
-            "column": None,
-            "end_line_number": None,
-            "end_column": None,
-            "message": "Code structure differs from expected solution"
-        }]
+        issues.append({"message": "Code structure differs from expected solution"})
+
     score = max(10.0, sim - len(issues) * 10)
 
     return {
@@ -72,9 +91,19 @@ def compare_ast(user_code: str,
         "score": score,
         "feedback": {
             "message": f"AST similarity: {sim:.1f}%",
-            "issues": issues
+            "issues": [
+                {
+                    "line_number": 1,
+                    "column": None,
+                    "end_line_number": None,
+                    "end_column": None,
+                    "message": issue["message"]
+                }
+                for issue in issues
+            ]
         }
     }
+
 
 
 @app.post("/construct-answers", response_model=Dict[str, Any])
@@ -87,8 +116,17 @@ async def construct_answers(items: List[ConstructAnswerItem]):
 
 @app.post("/check-answer", response_model=ScoreResponse)
 async def check_answer(req: CheckAnswerRequest):
-    user_dump = get_ast_dump(req.user_code)
-    comparison = compare_ast(req.user_code, req.correct_code, user_dump, req.correct_ast)
+    """Parse user code, compare AST dumps, and return feedback."""
+    try:
+        user_dump = get_ast_dump(req.user_code)
+    except HTTPException as he:
+        log_error(req.question_id, req.user_code, he.detail)
+        raise
+    try:
+        comparison = compare_ast(user_dump, req.correct_ast)
+    except Exception as e:
+        log_error(req.question_id, req.user_code, f"Internal error: {e}")
+        raise HTTPException(status_code=500, detail="Internal error checking code")  from e
     return ScoreResponse(
         exact_match=comparison["exact_match"],
         score=comparison["score"],
