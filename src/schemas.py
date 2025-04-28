@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict 
 from pydantic import BaseModel
 
 
@@ -6,13 +6,18 @@ class ConstructAnswerItem(BaseModel):
     question_id: str
     correct_code: str
 
+class ConstructedAnswer(BaseModel):
+    code: str
+    ast: str
+
 class ConstructAnswersResponse(BaseModel):
-    answers: List[ConstructAnswerItem]
+    answers: Dict[str, ConstructAnswerItem]
 
 class CheckAnswerRequest(BaseModel):
     question_id: str
     user_code: str
-    correct_ast: str    # AST dump as a string
+    correct_code: str 
+    correct_ast: Optional[str] = None 
 
 class CodeIssue(BaseModel):
     line_number: int
