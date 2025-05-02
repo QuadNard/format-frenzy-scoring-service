@@ -1,6 +1,7 @@
 import difflib
 import ast
 from typing import List, Dict, Any
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +20,17 @@ from src.scoring import compare_ast
 from src.ast_analyzer import find_missing_nodes
 from src.server.cruds import crud_router_v1
 from src.utils.error_logger import error_logger, log_error
+from dotenv import load_dotenv
+
+
+load_dotenv() 
+
+
+env = os.getenv("ENV", "production")
+origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "")
+           .split(",") if origin.strip()]
+
+
 
 # TODO: Move this to utils/ast_utils.py
 def get_ast_dump(src: str) -> str:
@@ -49,7 +61,7 @@ ast_cache = {}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,7 +90,7 @@ async def construct_answers(items: List[ConstructAnswerItem]):
             dump = get_ast_dump(item.correct_code)
             ast_cache[cache_key] = dump
             result[item.question_id] = dump
-    
+   
     return result
 
 @app.post("/check-answer", response_model=ScoreResponse)
@@ -102,7 +114,7 @@ async def check_answer(req: CheckAnswerRequest):
             if missing_nodes and not result["exact_match"]:
                 # Add missing nodes to our issues
                 result["feedback"]["issues"].extend(missing_nodes)
-        except Exception as node_error:
+        except ImportError as node_error:
             # If node analysis fails, just log it but continue with the basic comparison
             log_error(req.question_id, req.user_code, f"Node analysis error: {node_error}")
     
